@@ -1,9 +1,9 @@
 package io.github.haykam821.diceyheights.game.win;
 
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 
-public record WinResult(Text message) {
-	private static final Text NONE_MESSAGE = Text.translatable("text.diceyheights.no_winners").formatted(Formatting.GOLD);
-	protected static final WinResult NONE = new WinResult(NONE_MESSAGE);
+public record WinResult(Component message) {
+	private static final Component NONE_MESSAGE = Component.translatable("text.diceyheights.no_winners").withStyle(ChatFormatting.GOLD);
+	static final WinResult NONE = new WinResult(NONE_MESSAGE);
 }

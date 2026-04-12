@@ -17,26 +17,26 @@ import io.github.haykam821.diceyheights.game.win.FreeForAllWinManager;
 import io.github.haykam821.diceyheights.game.win.TeamWinManager;
 import io.github.haykam821.diceyheights.game.win.WinManager;
 import io.github.haykam821.diceyheights.game.win.WinResult;
-import net.minecraft.entity.damage.DamageSource;
-import net.minecraft.item.AirBlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.OperatorOnlyBlockItem;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.registry.entry.RegistryEntryList;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.item.AirItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.GameMasterBlockItem;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Util;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.intprovider.IntProvider;
-import net.minecraft.util.math.random.Random;
-import net.minecraft.world.GameMode;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.valueproviders.IntProvider;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.GameType;
 import xyz.nucleoid.plasmid.api.game.GameActivity;
 import xyz.nucleoid.plasmid.api.game.GameCloseReason;
 import xyz.nucleoid.plasmid.api.game.GameSpace;
@@ -58,8 +58,8 @@ import xyz.nucleoid.stimuli.event.player.PlayerDeathEvent;
 
 public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameActivityEvents.Tick, GamePlayerEvents.Accept, GamePlayerEvents.Remove, PlayerDeathEvent {
 	private final GameSpace gameSpace;
-	private final Random random;
-	private final ServerWorld world;
+	private final RandomSource random;
+	private final ServerLevel world;
 	private final DiceyHeightsMap map;
 	private final DiceyHeightsConfig config;
 
@@ -68,7 +68,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 
 	private final WinManager winManager;
 
-	private final RegistryEntryList<Item> items;
+	private final HolderSet<Item> items;
 
 	private boolean beforeFirstItem = true;
 	private int ticksUntilNextItem;
@@ -76,7 +76,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 
 	private int ticksUntilClose = -1;
 
-	public DiceyHeightsActivePhase(GameSpace gameSpace, ServerWorld world, DiceyHeightsMap map, DiceyHeightsConfig config, Optional<TeamSelectionLobby> maybeTeamSelection, Optional<TeamManager> maybeTeamManager) {
+	public DiceyHeightsActivePhase(GameSpace gameSpace, ServerLevel world, DiceyHeightsMap map, DiceyHeightsConfig config, Optional<TeamSelectionLobby> maybeTeamSelection, Optional<TeamManager> maybeTeamManager) {
 		this.gameSpace = gameSpace;
 		this.world = world;
 		this.random = world.getRandom();
@@ -85,7 +85,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 
 		PlayerSet participants = this.gameSpace.getPlayers().participants();
 
-		List<ServerPlayerEntity> shuffledPlayers = participants.stream().collect(Collectors.toCollection(ArrayList::new));
+		List<ServerPlayer> shuffledPlayers = participants.stream().collect(Collectors.toCollection(ArrayList::new));
 		Util.shuffle(shuffledPlayers, this.random);
 
 		this.players = new ArrayList<>(shuffledPlayers.size());
@@ -98,22 +98,20 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 
 		maybeTeamSelection.ifPresent(teamSelection -> {
 			teamSelection.allocate(participants, (key, player) -> {
-				playersToTeams.put(player.getUuid(), key);
+				playersToTeams.put(player.getUUID(), key);
 				maybeTeamManager.get().addPlayerTo(player, key);
 			});
 		});
 
-		for (ServerPlayerEntity player : shuffledPlayers) {
-			float angle = (index / (float) shuffledPlayers.size()) * (MathHelper.PI * 2);
+		for (ServerPlayer player : shuffledPlayers) {
+			float angle = (index / (float) shuffledPlayers.size()) * (Mth.PI * 2);
 
-			Vec3d pillarPos = this.map.getPillarPos(this.random, angle);
-			float pillarYaw = angle * MathHelper.DEGREES_PER_RADIAN + 90;
+			Vec3 pillarPos = this.map.getPillarPos(this.random, angle);
+			float pillarYaw = angle * Mth.RAD_TO_DEG + 90;
 
-			GameTeamKey key = playersToTeams.get(player.getUuid());
+			GameTeamKey key = playersToTeams.get(player.getUUID());
 
-			TeamEntry team = key == null ? null : keysToTeams.computeIfAbsent(key, k -> {
-				return new TeamEntry(this.config.teams().orElseThrow().byKey(k));
-			});
+			TeamEntry team = key == null ? null : keysToTeams.computeIfAbsent(key, k -> new TeamEntry(this.config.teams().orElseThrow().byKey(k)));
 
 			this.players.add(new PlayerEntry(player, team, pillarPos, pillarYaw));
 
@@ -123,13 +121,13 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		this.singleplayer = players.size() == 1;
 
 		this.items = this.config.items().orElseGet(() -> {
-			List<RegistryEntry.Reference<Item>> items = this.world.getRegistryManager()
-				.getOrThrow(RegistryKeys.ITEM)
-				.streamEntries()
+			List<Holder.Reference<Item>> items = this.world.registryAccess()
+				.lookupOrThrow(Registries.ITEM)
+				.listElements()
 				.filter(this::isItemEnabled)
 				.toList();
 
-			return RegistryEntryList.of(items);
+			return HolderSet.direct(items);
 		});
 
 		this.resetTicksUntilNextItem(true, this.config.ticksUntilFirstItem().orElse(this.config.ticksUntilNextItem()));
@@ -153,7 +151,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		}
 	}
 
-	public static void open(GameSpace gameSpace, ServerWorld world, DiceyHeightsMap map, DiceyHeightsConfig config, Optional<TeamSelectionLobby> teamSelection) {
+	public static void open(GameSpace gameSpace, ServerLevel world, DiceyHeightsMap map, DiceyHeightsConfig config, Optional<TeamSelectionLobby> teamSelection) {
 		gameSpace.setActivity(activity -> {
 			Optional<TeamManager> maybeTeamManager = config.teams().map(teams -> {
 				TeamManager teamManager = TeamManager.addTo(activity);
@@ -194,9 +192,9 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 			player.spawn(this.map, this.world, this.random, this.ticksUntilNextItem);
 		}
 
-		for (ServerPlayerEntity player : this.gameSpace.getPlayers().spectators()) {
+		for (ServerPlayer player : this.gameSpace.getPlayers().spectators()) {
 			this.map.teleportToWaitingSpawn(player);
-			player.changeGameMode(GameMode.SPECTATOR);
+			player.setGameMode(GameType.SPECTATOR);
 		}
 	}
 
@@ -215,11 +213,11 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		for (PlayerEntry entry : this.players) {
 			entry.tick(this.world, this.config.itemSpawnStrategy(), this.ticksUntilNextItem, this.beforeFirstItem);
 
-			ServerPlayerEntity player = entry.getAlivePlayer();
+			ServerPlayer player = entry.getAlivePlayer();
 
 			if (player != null) {
 				if (player.getY() > (DiceyHeightsMap.START_Y + this.config.mapConfig().maxHeight())) {
-					player.damage(this.world, this.world.getDamageSources().outOfWorld(), 1);
+					player.hurtServer(this.world, this.world.damageSources().fellOutOfWorld(), 1);
 				} else if (map.isOutOfBounds(player)) {
 					this.eliminate(entry);
 				}
@@ -231,58 +229,58 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		if (this.ticksUntilNextItem <= 0) {
 			this.resetTicksUntilNextItem(false, this.config.ticksUntilNextItem());
 
-			this.gameSpace.getPlayers().playSound(SoundEvents.BLOCK_COPPER_BULB_TURN_ON, SoundCategory.PLAYERS, 1, 1);
+			this.gameSpace.getPlayers().playSound(SoundEvents.COPPER_BULB_TURN_ON, SoundSource.PLAYERS, 1, 1);
 			this.giveRandomItems();
 		} else if (this.ticksPerBeat > 0 && this.ticksUntilNextItem % this.ticksPerBeat == 0) {
-			this.gameSpace.getPlayers().playSound(SoundEvents.BLOCK_COPPER_BULB_TURN_OFF, SoundCategory.PLAYERS, 1, 1f);
+			this.gameSpace.getPlayers().playSound(SoundEvents.COPPER_BULB_TURN_OFF, SoundSource.PLAYERS, 1, 1f);
 		}
 
 		WinResult win = this.winManager.checkWin();
 
 		if (win != null) {
 			this.gameSpace.getPlayers().sendMessage(win.message());
-			this.ticksUntilClose = this.config.ticksUntilClose().get(this.random);
+			this.ticksUntilClose = this.config.ticksUntilClose().sample(this.random);
 		}
 	}
 
 	@Override
 	public JoinAcceptorResult onAcceptPlayers(JoinAcceptor acceptor) {
 		return acceptor.teleport(this.world, this.map.getWaitingSpawnPos()).thenRunForEach(player -> {
-			player.changeGameMode(GameMode.SPECTATOR);
+			player.setGameMode(GameType.SPECTATOR);
 		});
 	}
 
 	@Override
-	public void onRemovePlayer(ServerPlayerEntity player) {
+	public void onRemovePlayer(ServerPlayer player) {
 		this.eliminate(this.getPlayerEntry(player));
 	}
 
 	@Override
-	public EventResult onDeath(ServerPlayerEntity player, DamageSource source) {
+	public EventResult onDeath(ServerPlayer player, DamageSource source) {
 		this.eliminate(this.getPlayerEntry(player));
 		return EventResult.DENY;
 	}
 
 	// Utilities
 
-	private boolean isItemEnabled(RegistryEntry<Item> entry) {
-		if (entry.getKey().isPresent() && !entry.getKey().get().getValue().getNamespace().equals(Identifier.DEFAULT_NAMESPACE)) {
+	private boolean isItemEnabled(Holder<Item> entry) {
+		if (entry.unwrapKey().isPresent() && !entry.unwrapKey().get().identifier().getNamespace().equals(Identifier.DEFAULT_NAMESPACE)) {
 			return false;
 		}
 
 		Item item = entry.value();
-		return !(item instanceof OperatorOnlyBlockItem) && !(item instanceof AirBlockItem) && item.isEnabled(this.world.getEnabledFeatures());
+		return !(item instanceof GameMasterBlockItem) && !(item instanceof AirItem) && item.isEnabled(this.world.enabledFeatures());
 	}
 
 	private void resetTicksUntilNextItem(boolean beforeFirstItem, IntProvider provider) {
 		this.beforeFirstItem = beforeFirstItem;
-		this.ticksUntilNextItem = provider.get(this.random);
-		this.ticksPerBeat = this.ticksUntilNextItem / this.config.beats().get(this.random);
+		this.ticksUntilNextItem = provider.sample(this.random);
+		this.ticksPerBeat = this.ticksUntilNextItem / this.config.beats().sample(this.random);
 	}
 
 	private void giveRandomItems() {
 		ItemSpawnStrategy strategy = this.config.itemSpawnStrategy();
-		int itemRolls = this.config.itemRolls().get(this.random);
+		int itemRolls = this.config.itemRolls().sample(this.random);
 
 		for (int roll = 0; roll < itemRolls; roll += 1) {
 			if (this.config.separate()) {
@@ -290,7 +288,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 					player.giveItemStack(this.world, strategy, () -> {
 						return this.getRandomItem()
 							.map(entry -> {
-								int count = this.config.itemCount().get(this.random);
+								int count = this.config.itemCount().sample(this.random);
 								return new ItemStack(entry, count);
 							})
 							.orElse(ItemStack.EMPTY);
@@ -300,7 +298,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 				this.getRandomItem().ifPresent(entry -> {
 					for (PlayerEntry player : this.players) {
 						player.giveItemStack(this.world, strategy, () -> {
-							int count = this.config.itemCount().get(this.random);
+							int count = this.config.itemCount().sample(this.random);
 							return new ItemStack(entry, count);
 						});
 					}
@@ -309,29 +307,27 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		}
 	}
 
-	private Optional<RegistryEntry<Item>> getRandomItem() {
-		return this.items.getRandom(this.random);
+	private Optional<Holder<Item>> getRandomItem() {
+		return this.items.getRandomElement(this.random);
 	}
 
 	/**
 	 * Attempts to eliminate a player.
-	 * @return whether an elimination has occurred
 	 */
-	public boolean eliminate(PlayerEntry player) {
-		if (this.isGameEnding()) return false;
+	public void eliminate(PlayerEntry player) {
+		if (this.isGameEnding()) return;
 
-		if (player == null) return false;
-		if (player.getAlivePlayer() == null) return false;
+		if (player == null) return;
+		if (player.getAlivePlayer() == null) return;
 
 		// Send elimination message
-		Text message = player.getEliminationMessage();
+		Component message = player.getEliminationMessage();
 		this.gameSpace.getPlayers().sendMessage(message);
 
 		// Perform removal operations
-		player.reset(GameMode.SPECTATOR);
+		player.reset(GameType.SPECTATOR);
 		player.clearAlivePlayer();
 
-		return true;
 	}
 
 	public List<PlayerEntry> getPlayers() {
@@ -346,7 +342,7 @@ public class DiceyHeightsActivePhase implements GameActivityEvents.Enable, GameA
 		return this.ticksUntilClose >= 0;
 	}
 
-	private PlayerEntry getPlayerEntry(ServerPlayerEntity player) {
+	private PlayerEntry getPlayerEntry(ServerPlayer player) {
 		if (player != null) {
 			for (PlayerEntry entry : this.players) {
 				if (player == entry.getAlivePlayer()) {
