@@ -1,8 +1,8 @@
 package io.github.haykam821.diceyheights.game.player;
 
-import net.minecraft.block.BlockState;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 import xyz.nucleoid.plasmid.api.game.common.team.GameTeam;
 import xyz.nucleoid.plasmid.api.util.ColoredBlocks;
 
@@ -14,11 +14,11 @@ public class TeamEntry {
 	}
 
 	public BlockState getBlock() {
-		return ColoredBlocks.concrete(this.team.config().blockDyeColor()).getDefaultState();
+		return ColoredBlocks.concrete(this.team.config().blockDyeColor()).defaultBlockState();
 	}
 
-	public Text getWinMessage() {
-		return Text.translatable("text.diceyheights.win.team", this.team.config().name()).formatted(Formatting.GOLD);
+	public Component getWinMessage() {
+		return Component.translatable("text.diceyheights.win.team", this.team.config().name()).withStyle(ChatFormatting.GOLD);
 	}
 
 	@Override

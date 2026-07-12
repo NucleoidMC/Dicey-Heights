@@ -2,9 +2,9 @@ package io.github.haykam821.diceyheights.game;
 
 import com.mojang.serialization.Codec;
 
-import net.minecraft.util.StringIdentifiable;
+import net.minecraft.util.StringRepresentable;
 
-public enum ItemSpawnStrategy implements StringIdentifiable {
+public enum ItemSpawnStrategy implements StringRepresentable {
 	/**
 	 * The item is inserted directly into the player's inventory.
 	 */
@@ -21,16 +21,16 @@ public enum ItemSpawnStrategy implements StringIdentifiable {
 	 */
 	AT_PILLAR_WHEN_ALIVE("at_pillar_when_alive");
 
-	public static final Codec<ItemSpawnStrategy> CODEC = StringIdentifiable.createCodec(ItemSpawnStrategy::values);
+	public static final Codec<ItemSpawnStrategy> CODEC = StringRepresentable.fromEnum(ItemSpawnStrategy::values);
 
 	private final String name;
 
-	private ItemSpawnStrategy(String name) {
+	ItemSpawnStrategy(String name) {
 		this.name = name;
 	}
 
 	@Override
-	public String asString() {
+	public String getSerializedName() {
 		return this.name;
 	}
 }
